@@ -45,9 +45,13 @@
     <div id="login-overlay">
         <div class="login-box">
             <h2 style="color:#38bdf8; margin-bottom:10px;">z.ween2x connection</h2>
-            <p style="font-size:12px; color:#94a3b8; margin-bottom:15px;">Private Passcode Enter Karein</p>
-            <input type="password" id="passcode" placeholder="Enter Access Code">
-            <button onclick="checkAuth()">Login Portal</button>
+            <p style="font-size:12px; color:#94a3b8; margin-bottom:15px;">Mobile & Passcode Login</p>
+            
+            <input type="password" id="passcode" placeholder="Enter Security Passcode">
+            <input type="tel" id="my-mobile" placeholder="Apna Mobile Number">
+            <input type="tel" id="partner-mobile" placeholder="Partner Ka Mobile Number">
+            
+            <button onclick="checkAuth()">Login & Connect</button>
         </div>
     </div>
 
@@ -86,19 +90,36 @@
     </div>
 
 <script>
-    // New Passcode System
     const PASSCODE = "#zween2x-601219";
     let peer = null, conn = null, currentCall = null, localStream = null;
     let mediaRecorder = null, recordedChunks = [];
 
+    // Pre-fill saved mobile numbers
+    window.onload = () => {
+        const savedMyMobile = localStorage.getItem('zw_my_mobile');
+        const savedPartnerMobile = localStorage.getItem('zw_partner_mobile');
+        if (savedMyMobile) document.getElementById('my-mobile').value = savedMyMobile;
+        if (savedPartnerMobile) document.getElementById('partner-mobile').value = savedPartnerMobile;
+    };
+
     function checkAuth() {
-        const input = document.getElementById('passcode').value;
-        if(input === PASSCODE) {
-            document.getElementById('login-overlay').style.display = 'none';
-            initConnection();
-        } else {
-            alert("Galat Passcode!");
+        const pass = document.getElementById('passcode').value.trim();
+        const myMob = document.getElementById('my-mobile').value.trim();
+        const partnerMob = document.getElementById('partner-mobile').value.trim();
+
+        if (pass !== PASSCODE) {
+            return alert("Galat Security Passcode!");
         }
+        if (!myMob || !partnerMob) {
+            return alert("Kripya apna aur partner dono ka mobile number daalein!");
+        }
+
+        // Save details locally
+        localStorage.setItem('zw_my_mobile', myMob);
+        localStorage.setItem('zw_partner_mobile', partnerMob);
+
+        document.getElementById('login-overlay').style.display = 'none';
+        initConnection(myMob, partnerMob);
     }
 
     function requestNotification() {
@@ -113,22 +134,21 @@
         }
     }
 
-    function initConnection() {
-        let savedRole = localStorage.getItem('zween2x_role');
-        if (!savedRole) {
-            savedRole = prompt("Aap Kaun Hain? Type '1' for User A, '2' for User B");
-            if (savedRole) localStorage.setItem('zween2x_role', savedRole);
-        }
-
-        const myID = savedRole === '1' ? 'zween2x-conn-user-a' : 'zween2x-conn-user-b';
-        const partnerID = savedRole === '1' ? 'zween2x-conn-user-b' : 'zween2x-conn-user-a';
+    function initConnection(myMob, partnerMob) {
+        const myID = 'zween2x-num-' + myMob;
+        const targetID = 'zween2x-num-' + partnerMob;
 
         peer = new Peer(myID);
 
         peer.on('open', id => {
-            document.getElementById('status').innerText = "Status: Online | Target: " + partnerID;
+            document.getElementById('status').innerText = "Status: Online | Connecting to " + partnerMob + "...";
             document.getElementById('status').style.color = "#38bdf8";
-            setTimeout(() => { conn = peer.connect(partnerID); setupChat(); }, 1500);
+            tryConnect(targetID);
+        });
+
+        peer.on('error', err => {
+            console.log("Peer error:", err);
+            setTimeout(() => tryConnect(targetID), 3000);
         });
 
         peer.on('connection', connection => {
@@ -147,6 +167,16 @@
                 currentCall = call;
             }
         });
+    }
+
+    function tryConnect(targetID) {
+        if(!conn || !conn.open) {
+            conn = peer.connect(targetID);
+            setupChat();
+            setTimeout(() => {
+                if(!conn || !conn.open) tryConnect(targetID);
+            }, 3000);
+        }
     }
 
     function setupChat() {
@@ -276,11 +306,11 @@
     }
 
     async function startCall(video) {
-        const savedRole = localStorage.getItem('zween2x_role');
-        const partnerID = savedRole === '1' ? 'zween2x-conn-user-b' : 'zween2x-conn-user-a';
+        const partnerMob = localStorage.getItem('zw_partner_mobile');
+        const targetID = 'zween2x-num-' + partnerMob;
         localStream = await navigator.mediaDevices.getUserMedia({ video: video, audio: true });
         document.getElementById('localVideo').srcObject = localStream;
-        const call = peer.call(partnerID, localStream);
+        const call = peer.call(targetID, localStream);
         call.on('stream', s => document.getElementById('remoteVideo').srcObject = s);
         currentCall = call;
     }
