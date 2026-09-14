@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>z.ween2x connection</title>
+    <!-- iOS Emoji Font & PeerJS -->
+    <link href="https://cdn.jsdelivr.net/npm/apple-emojis@1.0.0/apple-emojis.css" rel="stylesheet">
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Apple Color Emoji", sans-serif; }
+        body { background: #090d16; color: #f8fafc; display: flex; flex-direction: column; height: 100vh; justify-content: space-between; }
+        header { background: #1e293b; padding: 12px; text-align: center; border-bottom: 1px solid #334155; }
+        h1 { color: #38bdf8; font-size: 18px; }
+        
+        /* Login Screen */
+        #login-overlay { position: fixed; inset: 0; background: #090d16; z-index: 999; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .login-box { background: #1e293b; padding: 25px; border-radius: 12px; width: 100%; max-width: 350px; text-align: center; border: 1px solid #334155; }
+        
+        .card { background: #1e293b; padding: 12px; border-radius: 10px; margin: 10px; border: 1px solid #334155; }
+        input { width: 100%; padding: 10px; margin: 6px 0; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #fff; font-size: 14px; text-align: center; }
+        button { background: #0284c7; color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 5px; }
+        .btn-call { background: #10b981; width: auto; }
+        .btn-rec { background: #8b5cf6; width: auto; }
+        .btn-danger { background: #ef4444; width: auto; }
+        
+        /* Video Grid */
+        .video-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 10px; }
+        video { width: 100%; height: 140px; background: #000; border-radius: 8px; object-fit: cover; }
+        
+        /* Chat Box */
+        #messages { height: 220px; overflow-y: auto; border: 1px solid #334155; padding: 10px; border-radius: 8px; background: #0f172a; text-align: left; font-size: 14px; }
+        .msg { margin-bottom: 8px; padding: 8px 12px; border-radius: 8px; max-width: 80%; word-break: break-all; position: relative; }
+        .me { background: #0369a1; margin-left: auto; text-align: right; }
+        .partner { background: #334155; }
+        .edited-tag { font-size: 10px; opacity: 0.6; margin-left: 5px; }
+        .edit-btn { font-size: 10px; background: transparent; color: #cbd5e1; border: none; width: auto; padding: 0; margin-left: 8px; text-decoration: underline; cursor: pointer; }
+        
+        .file-btn { display: block; background: #475569; padding: 8px; border-radius: 6px; cursor: pointer; font-size: 12px; text-align: center; margin-top: 6px; }
+    </style>
+</head>
+<body>
+
+    <!-- Private Login Screen -->
+    <div id="login-overlay">
+        <div class="login-box">
+            <h2 style="color:#38bdf8; margin-bottom:10px;">z.ween2x connection</h2>
+            <p style="font-size:12px; color:#94a3b8; margin-bottom:15px;">Private Passcode Enter Karein</p>
+            <input type="password" id="passcode" placeholder="Enter Access Code">
+            <button onclick="checkAuth()">Login Portal</button>
+        </div>
+    </div>
+
+    <header>
+        <h1>z.ween2x connection</h1>
+        <p style="color:#94a3b8; font-size:11px;">Encrypted P2P Connection</p>
+    </header>
+
+    <div class="card" style="margin-top:5px;">
+        <button onclick="requestNotification()" style="background:#f59e0b; color:#000; margin-bottom:8px;">🔔 Enable Desktop Notifications</button>
+        <p id="status" style="color:#ef4444; font-size:12px;">Status: Offline</p>
+    </div>
+
+    <!-- Call & Recording Controls -->
+    <div style="text-align:center;">
+        <button onclick="startCall(true)" class="btn-call">📹 Video</button>
+        <button onclick="startCall(false)" class="btn-call">📞 Audio</button>
+        <button onclick="toggleRecording()" id="rec-btn" class="btn-rec">🎙️ Record Call</button>
+        <button onclick="endCall()" class="btn-danger">End</button>
+    </div>
+
+    <div class="video-grid">
+        <video id="localVideo" autoplay muted playsinline></video>
+        <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+
+    <!-- Chat Window -->
+    <div class="card" style="flex:1; display:flex; flex-direction:column; justify-content:space-between;">
+        <div id="messages"></div>
+        <div style="display:flex; gap:5px; margin-top:5px;">
+            <input type="text" id="msg-input" placeholder="Message/Emoji likhein..." style="flex:1; margin:0;">
+            <button onclick="sendMessage()" style="width:auto; margin:0;">Send</button>
+        </div>
+        <label for="file-input" class="file-btn">📷 Share Photo / Video</label>
+        <input type="file" id="file-input" onchange="sendFile()" hidden>
+    </div>
+
+<script>
+    // New Passcode System
+    const PASSCODE = "#zween2x-601219";
+    let peer = null, conn = null, currentCall = null, localStream = null;
+    let mediaRecorder = null, recordedChunks = [];
+
+    function checkAuth() {
+        const input = document.getElementById('passcode').value;
+        if(input === PASSCODE) {
+            document.getElementById('login-overlay').style.display = 'none';
+            initConnection();
+        } else {
+            alert("Galat Passcode!");
+        }
+    }
+
+    function requestNotification() {
+        if ("Notification" in window) {
+            Notification.requestPermission().then(p => { if(p === 'granted') alert("Notifications Active!"); });
+        }
+    }
+
+    function showNotification(title, body) {
+        if ("Notification" in window && Notification.permission === "granted") {
+            new Notification(title, { body: body });
+        }
+    }
+
+    function initConnection() {
+        let savedRole = localStorage.getItem('zween2x_role');
+        if (!savedRole) {
+            savedRole = prompt("Aap Kaun Hain? Type '1' for User A, '2' for User B");
+            if (savedRole) localStorage.setItem('zween2x_role', savedRole);
+        }
+
+        const myID = savedRole === '1' ? 'zween2x-conn-user-a' : 'zween2x-conn-user-b';
+        const partnerID = savedRole === '1' ? 'zween2x-conn-user-b' : 'zween2x-conn-user-a';
+
+        peer = new Peer(myID);
+
+        peer.on('open', id => {
+            document.getElementById('status').innerText = "Status: Online | Target: " + partnerID;
+            document.getElementById('status').style.color = "#38bdf8";
+            setTimeout(() => { conn = peer.connect(partnerID); setupChat(); }, 1500);
+        });
+
+        peer.on('connection', connection => {
+            conn = connection;
+            showNotification("z.ween2x connection", "Partner Online Aa Gaye Hain!");
+            setupChat();
+        });
+
+        peer.on('call', async call => {
+            showNotification("z.ween2x Call", "Incoming Call...");
+            if (confirm("Incoming Call... Accept karein?")) {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                document.getElementById('localVideo').srcObject = localStream;
+                call.answer(localStream);
+                call.on('stream', s => document.getElementById('remoteVideo').srcObject = s);
+                currentCall = call;
+            }
+        });
+    }
+
+    function setupChat() {
+        conn.on('open', () => {
+            document.getElementById('status').innerText = "Status: Connected to Partner!";
+            document.getElementById('status').style.color = "#10b981";
+        });
+        conn.on('data', data => {
+            if (data.type === 'text') {
+                appendMsg(data.content, 'partner', data.id);
+                showNotification("Message", data.content);
+            } else if (data.type === 'edit') {
+                updateMsgUI(data.id, data.newContent);
+            } else if (data.type === 'file') {
+                appendFile(data, 'partner');
+                showNotification("Media", "Partner Ne Photo/Video Bheji Hai");
+            }
+        });
+    }
+
+    function sendMessage() {
+        const input = document.getElementById('msg-input');
+        if (input.value && conn) {
+            const msgId = 'msg-' + Date.now();
+            conn.send({ type: 'text', content: input.value, id: msgId });
+            appendMsg(input.value, 'me', msgId);
+            input.value = '';
+        }
+    }
+
+    function editMessage(msgId) {
+        const msgDiv = document.getElementById(msgId);
+        const oldText = msgDiv.getAttribute('data-text');
+        const newText = prompt("Edit Message:", oldText);
+        if (newText && newText !== oldText) {
+            msgDiv.setAttribute('data-text', newText);
+            msgDiv.querySelector('.msg-body').innerText = newText;
+            if(!msgDiv.querySelector('.edited-tag')) {
+                msgDiv.innerHTML += '<span class="edited-tag">(edited)</span>';
+            }
+            if(conn) conn.send({ type: 'edit', id: msgId, newContent: newText });
+        }
+    }
+
+    function updateMsgUI(msgId, newText) {
+        const msgDiv = document.getElementById(msgId);
+        if(msgDiv) {
+            msgDiv.querySelector('.msg-body').innerText = newText;
+            if(!msgDiv.querySelector('.edited-tag')) {
+                msgDiv.innerHTML += '<span class="edited-tag">(edited)</span>';
+            }
+        }
+    }
+
+    function appendMsg(msg, sender, msgId) {
+        const box = document.getElementById('messages');
+        const div = document.createElement('div');
+        div.className = `msg ${sender}`;
+        div.id = msgId;
+        div.setAttribute('data-text', msg);
+        
+        let editHtml = sender === 'me' ? `<button class="edit-btn" onclick="editMessage('${msgId}')">Edit</button>` : '';
+        div.innerHTML = `<span class="msg-body">${msg}</span>${editHtml}`;
+        
+        box.appendChild(div);
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function sendFile() {
+        const file = document.getElementById('file-input').files[0];
+        if (file && conn) {
+            const reader = new FileReader();
+            reader.onload = e => {
+                const data = { type: 'file', fileName: file.name, fileType: file.type, buffer: e.target.result };
+                conn.send(data);
+                appendFile(data, 'me');
+            };
+            reader.readAsDataURL(file);
+        }
+    }
+
+    function appendFile(data, sender) {
+        const box = document.getElementById('messages');
+        const div = document.createElement('div');
+        div.className = `msg ${sender}`;
+        if (data.fileType.startsWith('image/')) {
+            const img = document.createElement('img');
+            img.src = data.buffer;
+            img.style.maxWidth = "100%";
+            div.appendChild(img);
+        } else {
+            const a = document.createElement('a');
+            a.href = data.buffer;
+            a.download = data.fileName;
+            a.innerText = `📁 Download: ${data.fileName}`;
+            a.style.color = "#fff";
+            div.appendChild(a);
+        }
+        box.appendChild(div);
+    }
+
+    function toggleRecording() {
+        const btn = document.getElementById('rec-btn');
+        if (!mediaRecorder || mediaRecorder.state === "inactive") {
+            if (!localStream) return alert("Pehle Call Start Karein!");
+            recordedChunks = [];
+            mediaRecorder = new MediaRecorder(localStream);
+            mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+            mediaRecorder.onstop = saveRecording;
+            mediaRecorder.start();
+            btn.innerText = "🔴 Recording...";
+            btn.style.background = "#ef4444";
+        } else {
+            mediaRecorder.stop();
+            btn.innerText = "🎙️ Record Call";
+            btn.style.background = "#8b5cf6";
+        }
+    }
+
+    function saveRecording() {
+        const blob = new Blob(recordedChunks, { type: "video/webm" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "zween2x-call-rec.webm";
+        a.click();
+    }
+
+    async function startCall(video) {
+        const savedRole = localStorage.getItem('zween2x_role');
+        const partnerID = savedRole === '1' ? 'zween2x-conn-user-b' : 'zween2x-conn-user-a';
+        localStream = await navigator.mediaDevices.getUserMedia({ video: video, audio: true });
+        document.getElementById('localVideo').srcObject = localStream;
+        const call = peer.call(partnerID, localStream);
+        call.on('stream', s => document.getElementById('remoteVideo').srcObject = s);
+        currentCall = call;
+    }
+
+    function endCall() {
+        if (currentCall) currentCall.close();
+        if (localStream) localStream.getTracks().forEach(track => track.stop());
+    }
+</script>
+</body>
+</html>
